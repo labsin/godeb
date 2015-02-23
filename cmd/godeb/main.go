@@ -4,7 +4,7 @@
 //
 // For details of how this tool works and context for why it was built,
 // please refer to the following blog post:
-// 
+//
 //   http://blog.labix.org/2013/06/15/in-flight-deb-packages-of-go
 //
 package main
@@ -13,8 +13,8 @@ import (
 	"bytes"
 	"fmt"
 	"go/build"
-	"io/ioutil"
 	"gopkg.in/xmlpath.v1"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
@@ -78,7 +78,10 @@ func run() error {
 func listCommand() error {
 	tbs, err := tarballs()
 	if err != nil {
-		return err
+		if len(tbs) == 0 {
+			return err
+		}
+		fmt.Println(err)
 	}
 	for _, tb := range tbs {
 		fmt.Println(tb.Version)
@@ -103,7 +106,10 @@ func removeCommand() error {
 func actionCommand(version string, install bool) error {
 	tbs, err := tarballs()
 	if err != nil {
-		return err
+		if len(tbs) == 0 {
+			return err
+		}
+		fmt.Println(err)
 	}
 	var url string
 	if version == "" {
@@ -154,7 +160,7 @@ func actionCommand(version string, install bool) error {
 	if err := createDeb(version, resp.Body, deb); err != nil {
 		return err
 	}
-	if err := os.Rename(debName + ".inprogress", debName); err != nil {
+	if err := os.Rename(debName+".inprogress", debName); err != nil {
 		return err
 	}
 	fmt.Println("package", debName, "ready")
@@ -186,12 +192,13 @@ type tarballSource struct {
 var tarballSources = []tarballSource{
 	{"https://code.google.com/p/go/downloads/list?can=1&q=linux", "//a/@href[contains(., 'go.googlecode.com')]"},
 	{"http://golang.org/dl/", "//a/@href[contains(., 'storage.googleapis.com/golang/')]"},
+	{"http://dave.cheney.net/unofficial-arm-tarballs", "//a/@href[contains(., 'dave.cheney.net/paste')]"},
 }
 
 func tarballs() ([]*Tarball, error) {
 	type result struct {
 		tarballs []*Tarball
-		err error
+		err      error
 	}
 	results := make(chan result)
 	for _, source := range tarballSources {
@@ -207,13 +214,17 @@ func tarballs() ([]*Tarball, error) {
 	for _ = range tarballSources {
 		r := <-results
 		if r.err != nil {
-			err = r.err
+			if err != nil {
+				err = fmt.Errorf("%v\n%v", err, r.err)
+			} else {
+				err = r.err
+			}
 		} else {
 			tbs = append(tbs, r.tarballs...)
 		}
 	}
 	if err != nil {
-		return nil, err
+		return tbs, err
 	}
 	sort.Sort(tarballSlice(tbs))
 	return tbs, nil
@@ -260,11 +271,17 @@ func parseURL(url string) (tb *Tarball, ok bool) {
 	if len(s) < 3 || !strings.HasPrefix(s, "go") || !(s[2] >= '1' && s[2] <= '9') {
 		return nil, false
 	}
-	suffix := fmt.Sprintf(".linux-%s.tar.gz", build.Default.GOARCH)
+	var suffix string
+	if strings.HasSuffix(build.Default.GOARCH, "arm") {
+		suffix = ".linux-arm~multiarch-armv7-1.tar.gz"
+
+	} else {
+		suffix = fmt.Sprintf(".linux-%s.tar.gz", build.Default.GOARCH)
+	}
 	if !strings.HasSuffix(s, suffix) {
 		return nil, false
 	}
-	return &Tarball{url, s[2:len(s)-len(suffix)]}, true
+	return &Tarball{url, s[2 : len(s)-len(suffix)]}, true
 }
 
 func clearScripts(data []byte) {
